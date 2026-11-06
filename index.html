@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="A small, private, in-browser text continuation playground powered by GPT-2.">
+<link rel="icon" href="data:,">
+<title>Text generator</title>
+<style>
+:root{color-scheme:light dark;--bg:#f8f7f4;--paper:#fff;--ink:#252723;--muted:#71736d;--line:#d9dbd4;--accent:#356b50;--gen:#356b72;--soft:#edf2ec;--error:#a53632}
+@media(prefers-color-scheme:dark){:root{--bg:#171a18;--paper:#1f2320;--ink:#e5e8e0;--muted:#a3aaa0;--line:#3c443d;--accent:#a3caa6;--gen:#91c8d0;--soft:#29332b;--error:#ffaaa0}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.6 system-ui,sans-serif}main{width:min(880px,100%);margin:60px auto;padding:0 24px}header{margin-bottom:28px}.eyebrow{color:var(--accent);font-size:11px;letter-spacing:.17em;font-weight:700;text-transform:uppercase}h1{font-size:32px;letter-spacing:-.055em;font-weight:550;margin:8px 0}p{margin:0;color:var(--muted)}.editor-shell{border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--paper)}#editor{min-height:340px;max-height:65vh;overflow:auto;padding:24px;outline:none;white-space:pre-wrap;overflow-wrap:anywhere;font:17px/1.8 ui-monospace,SFMono-Regular,Consolas,monospace;caret-color:var(--ink)}#editor:empty:before{content:attr(data-placeholder);color:var(--muted);pointer-events:none}#editor:focus{box-shadow:inset 0 0 0 2px var(--accent)}.gen{color:var(--gen)}.editor-foot{display:flex;gap:14px;justify-content:space-between;flex-wrap:wrap;border-top:1px solid var(--line);padding:10px 16px;color:var(--muted);font-size:12px}.dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--gen);margin-right:6px}.toolbar{display:flex;gap:8px;align-items:center;margin:16px 0}button{font:inherit;font-size:14px;border:1px solid var(--line);border-radius:5px;padding:9px 16px;background:var(--paper);color:var(--ink);cursor:pointer}button.primary{background:var(--ink);color:var(--bg);border-color:var(--ink)}button:disabled{opacity:.42;cursor:not-allowed}button:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:3px}.spacer{flex:1}#status{font-size:13px;color:var(--accent);min-height:23px}#error{color:var(--error);font-size:14px;margin:8px 0}#download{margin:14px 0}#download p{font-size:12px}progress{accent-color:var(--accent);width:100%;height:8px;display:block;margin:8px 0}details{border-top:1px solid var(--line);margin-top:28px;padding-top:16px}summary{cursor:pointer;color:var(--muted);font-size:14px;width:fit-content}.settings{display:grid;grid-template-columns:1fr 1fr;gap:18px 32px;margin:22px 0}label{display:flex;justify-content:space-between;font-size:13px}output{font-variant-numeric:tabular-nums;color:var(--accent)}input[type=range]{width:100%;accent-color:var(--accent);margin:9px 0}small{color:var(--muted);font-size:12px}.note{margin-top:28px;font-size:12px;line-height:1.8}.note strong{font-weight:500;color:var(--ink)}[hidden]{display:none!important}@media(max-width:600px){main{margin:28px auto;padding:0 16px}h1{font-size:29px}#editor{padding:18px;min-height:320px;font-size:16px}.toolbar{flex-wrap:wrap}.toolbar button{padding:9px 12px}.settings{grid-template-columns:1fr;gap:10px}.editor-foot{font-size:11px}}
+</style>
+</head>
+<body>
+<main>
+<header><div class="eyebrow">A little room for wandering</div><h1 id="app-name"></h1><p>Start a thought. See where it goes.</p></header>
+<div class="editor-shell"><div id="editor" contenteditable="true" role="textbox" aria-label="Your prompt and generated continuation" aria-multiline="true" spellcheck="false" data-placeholder="The last light in the city went out, and then..."></div><div class="editor-foot"><span><span class="dot"></span>Generated words appear in colour</span><span>Ctrl / ⌘ + Enter to continue</span></div></div>
+<div class="toolbar"><button class="primary" id="generate" disabled>Generate</button><button id="stop" disabled>Stop</button><span class="spacer"></span><button id="clear">Clear</button><button id="copy">Copy text</button></div>
+<div id="status" role="status" aria-live="polite">Loading model…</div><div id="error" role="alert" hidden></div>
+<div id="download"><progress id="progress" max="100" value="0" aria-label="Model download progress"></progress><p id="download-label">Preparing the first download…</p></div>
+<details><summary>Generation settings</summary><div class="settings" id="settings"></div><small>Short memory is part of the charm. Only the latest context tokens are used. GPT-2 has 1,024 positions total, so space is also reserved for your chosen continuation length.</small></details>
+<p class="note"><strong>GPT-2 small · runs on your device.</strong> No account, no server, no prompt uploads.<br>First visit downloads about 130 MB plus the runtime. The model is cached by your browser after the first visit, if storage is available. Older phones may be slow.<br>This is a raw text completer, not an assistant. It can be strange, inaccurate, or offensive.</p>
+</main>
+<script type="module">
+const APP_NAME = "Text Drift"; // Change this one value to rename the app.
+document.title = APP_NAME;
+document.querySelector('#app-name').textContent = APP_NAME;
+const $ = id => document.getElementById(id);
+const editor = $('editor');
+const specs = [
+ ['max_new_tokens','Length',50,500,1,100],
+ ['temperature','Temperature',0.1,1.5,0.1,0.9],
+ ['top_k','Top-k',0,100,1,40],
+ ['top_p','Top-p',0.1,1,0.01,0.95],
+ ['repetition_penalty','Repetition penalty',1,1.5,0.01,1.1],
+ ['context','Context window',64,1024,1,256]
+];
+let saved = {};
+try { saved = JSON.parse(localStorage.getItem('text-drift-settings') || '{}') || {}; } catch { /* Private browsing may disable storage. */ }
+const settings = {};
+for (const [key,label,min,max,step,initial] of specs) {
+ const candidate = Number(saved[key] ?? initial);
+ settings[key] = Number.isFinite(candidate) ? Math.max(min,Math.min(max,Math.round(candidate/step)*step)) : initial;
+ const wrap = document.createElement('div');
+ const caption = document.createElement('label'); caption.htmlFor = key; caption.textContent = label;
+ const value = document.createElement('output'); value.htmlFor = key; caption.append(value);
+ const input = document.createElement('input'); Object.assign(input,{type:'range',id:key,min,max,step,value:settings[key]});
+ const update = () => {settings[key] = Number(input.value); value.textContent = key === 'top_k' && !settings[key] ? 'Off' : input.value;};
+ update(); input.addEventListener('input',() => {update();try {localStorage.setItem('text-drift-settings',JSON.stringify(settings));} catch {}});
+ wrap.append(caption,input); $('settings').append(wrap);
+}
+let worker, ready = false, busy = false, generatedSpan, stopTimer, stopping = false;
+function state(text) { $('status').textContent = text; $('generate').disabled = !ready || busy; $('stop').disabled = !busy || stopping; $('clear').disabled = busy; editor.contentEditable = busy ? 'false' : 'true'; }
+function fail(message) {clearTimeout(stopTimer);busy = false;stopping = false;$('error').textContent = message;$('error').hidden = false;state(ready ? 'Ready · try again' : 'Unable to load model');$('download').hidden = true;}
+function boot(afterStop = false) {
+ ready = false; $('download').hidden = false; $('progress').value = 0; state('Loading model…');
+ try {
+  worker = new Worker('worker.js',{type:'module'});
+  worker.onerror = () => { ready = false; worker.terminate(); fail('The model worker could not start. Check your connection and reload. A modern browser with WebAssembly is needed.'); };
+  worker.onmessage = ({data}) => {
+   if (data.type === 'progress') { $('progress').value = data.percent; $('download-label').textContent = data.label; }
+   if (data.type === 'ready') {ready = true;$('download').hidden = true;state(afterStop ? 'Ready · stopped' : 'Ready');}
+   if (data.type === 'context') state(`Generating… using ${data.used} of ${data.total} prompt tokens`);
+   if (data.type === 'chunk' && busy) {
+    const follow = editor.scrollHeight - editor.scrollTop - editor.clientHeight < 80;
+    generatedSpan.append(document.createTextNode(data.text));
+    if (follow) editor.scrollTop = editor.scrollHeight;
+   }
+   if (data.type === 'done') {
+    clearTimeout(stopTimer);busy = false;stopping = false;state(data.stopped ? 'Ready · stopped' : 'Ready');
+    // Keep subsequent user typing outside the coloured generated run.
+    const tail = document.createTextNode('');generatedSpan.after(tail);
+    editor.focus();const range = document.createRange();range.setStart(tail,0);range.collapse(true);const selection = getSelection();selection.removeAllRanges();selection.addRange(range);
+   }
+   if (data.type === 'error') {ready = data.loaded;fail(data.message);}
+  };
+  worker.postMessage({type:'load'});
+ } catch {fail('Web Workers are unavailable. Open this page over HTTPS (or localhost) in a modern browser.');}
+}
+function generate() {
+ if (!ready || busy) return;
+ const text = editor.innerText.replace(/\r\n/g,'\n');
+ if (!text.trim()) {state('Write a few words first.');editor.focus();return;}
+ $('error').hidden = true;busy = true;stopping = false;
+ generatedSpan = document.createElement('span');generatedSpan.className = 'gen';
+ // Browsers create DIV/P blocks on Enter. Append inside the final block, not below it.
+ let target = editor;
+ while (target.lastChild?.nodeType === Node.ELEMENT_NODE && ['DIV','P'].includes(target.lastChild.tagName)) target = target.lastChild;
+ target.append(generatedSpan);
+ state('Generating…');worker.postMessage({type:'generate',text,settings:{...settings}});
+}
+$('generate').onclick = generate;
+$('stop').onclick = () => {
+ if (!busy || stopping) return;stopping = true;state('Stopping…');worker.postMessage({type:'stop'});
+ // A busy WASM operation may not yield immediately. Termination guarantees cancellation.
+ stopTimer = setTimeout(() => {worker.terminate();busy = false;stopping = false;boot(true);},1800);
+};
+document.addEventListener('keydown',e => {if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {e.preventDefault();generate();}});
+$('clear').onclick = () => {if(busy)return;editor.replaceChildren();editor.focus();state(ready ? 'Ready' : 'Loading model…');};
+$('copy').onclick = async () => {try {await navigator.clipboard.writeText(editor.innerText);$('copy').textContent = 'Copied';setTimeout(() => $('copy').textContent = 'Copy text',1600);} catch { $('error').hidden = false;$('error').textContent = 'Clipboard access is unavailable. Select the text and copy it with Ctrl / ⌘ + C.';}};
+// Strip rich paste and drops. Nothing from the editor is ever interpreted as HTML.
+editor.addEventListener('paste',e => {e.preventDefault();if(busy)return;document.execCommand('insertText',false,e.clipboardData.getData('text/plain'));});
+editor.addEventListener('drop',e => e.preventDefault());
+editor.addEventListener('beforeinput',e => {
+ if(e.inputType.startsWith('format')) {e.preventDefault();return;}
+ // Editing a generated run makes that run your own, in the normal text colour.
+ const selection = getSelection();
+ for (const node of [selection.anchorNode,selection.focusNode]) {
+  const span = (node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement)?.closest('.gen');
+  if(span) span.classList.remove('gen');
+ }
+});
+if (typeof WebAssembly === 'undefined') fail('This browser does not support WebAssembly. Please try a recent Chrome, Firefox, Safari, or Edge.');
+else boot();
+</script>
+</body>
+</html>
